@@ -1,0 +1,13 @@
+[project]
+name = "frl-light-rag-agent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.11.1",
+]
+
+[tool.setuptools.packages.find]
+include = ["rag_agent.py"]
+exclude = ["tests", "tests.*"]
