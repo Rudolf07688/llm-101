@@ -5,9 +5,16 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "jupyter>=1.1.1",
-    "langchain-anthropic>=0.3.5",
-    "langchain-core>=0.3.33",
-    "langgraph>=0.2.69",
-    "python-dotenv>=1.0.1",
+    "asyncio>=3.4.3",
+    "google-adk>=0.2.0",
+    "python-dotenv>=1.1.0",
 ]
+
+
+
+    # "google-adk>=0.1.0",
+    # "jupyter>=1.1.1",
+    # "langchain-anthropic>=0.3.5",
+    # "langchain-core>=0.3.33",
+    # "langgraph>=0.2.69",
+    # "python-dotenv>=1.0.1",
