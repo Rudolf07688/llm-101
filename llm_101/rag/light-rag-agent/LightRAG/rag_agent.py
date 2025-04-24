@@ -14,6 +14,7 @@ from openai import AsyncOpenAI
 from lightrag import LightRAG, QueryParam
 from lightrag.llm.openai import gpt_4o_mini_complete, openai_embed
 from lightrag.kg.shared_storage import initialize_pipeline_status
+from lightrag.base import StoragesStatus
 
 # Load environment variables from .env file
 dotenv.load_dotenv()
@@ -34,7 +35,8 @@ async def initialize_rag():
     rag = LightRAG(
         working_dir=WORKING_DIR,
         embedding_func=openai_embed,
-        llm_model_func=gpt_4o_mini_complete
+        llm_model_func=gpt_4o_mini_complete,
+        _storages_status=StoragesStatus.CREATED,
     )
 
     await rag.initialize_storages()
@@ -85,10 +87,14 @@ async def run_rag_agent(question: str,) -> str:
         The agent's response.
     """
     # Create dependencies
+    print("Initializing LightRAG...")
     lightrag = await initialize_rag()
     deps = RAGDeps(lightrag=lightrag)
+    print("LightRAG initialized.")
     
     # Run the agent
+    print("Running agent...")
+    print(f"Question: \"{question}\n\"")
     result = await agent.run(question, deps=deps)
     
     return result.data
