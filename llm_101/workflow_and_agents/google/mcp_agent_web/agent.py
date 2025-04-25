@@ -13,18 +13,25 @@ from google.adk import Runner
 from google.adk.events import Event
 from google.adk.sessions import InMemorySessionService
 from google.adk.runners import StreamingMode
-from google.adk.tools.google_search_tool import GoogleSearchTool
 from google.genai import types
+from google.adk.tools.mcp_tool.mcp_toolset import MCPToolset, SseServerParams, StdioServerParameters
+from google.adk.tools.google_search_tool import GoogleSearchTool
 
 from dotenv import load_dotenv, find_dotenv
 from typing import AsyncGenerator
 import asyncio
+import os
 
 
+# ----------------------------- define constants ----------------------------- #
 MODEL_GEMINI_2_0_FLASH = "gemini-2.0-flash"
-# Note: Specific model names might change. Refer to LiteLLM/Provider documentation.
 MODEL_GPT_4O = "openai/gpt-4o"
 MODEL_CLAUDE_SONNET = "anthropic/claude-3-sonnet-20240229"
+
+APP_NAME = "llm_101"
+USER_ID = "rudolf"
+SESSION_ID = "session_101"
+AGENT_MODEL = MODEL_GEMINI_2_0_FLASH
 
 
 def before_agent_callback(callback_context):
@@ -59,6 +66,21 @@ def get_weather(city: str) -> dict:
         return mock_weather_db[city_normalized]
     else:
         return {"status": "error", "error_message": f"Sorry, I don't have weather information for '{city}'."}
+
+
+async def get_tools_async():
+    """Gets tools from the File System MCP Server."""
+    print("Attempting to connect to MCP Filesystem server...")
+    tools, exit_stack = await MCPToolset.from_server(
+        connection_params=StdioServerParameters(
+            command='npx',
+            args=["-y",
+                    "@modelcontextprotocol/server-filesystem",
+                    os.getcwd()],                           # <---- Path to the folder to access
+        )
+    )
+    print("MCP Toolset created successfully.")
+    return tools, exit_stack
 
 
 async def call_agent_async(query: str, runner: Runner, user_id, session_id):
@@ -96,110 +118,80 @@ async def run_conversation(runner: Runner):
                             runner=runner,
                             user_id=USER_ID,
                             session_id=SESSION_ID)
+    
+async def get_agent_async():
+    """Creates an ADK Agent equipped with tools from the MCP Server."""
+    tools, exit_stack = await get_tools_async()
 
-# if __name__ == "__main__":
-
-# define constants
-APP_NAME = "llm_101"
-USER_ID = "rudolf"
-SESSION_ID = "session_101"
-AGENT_MODEL = MODEL_GEMINI_2_0_FLASH
-
-from google.adk.tools.mcp_tool.mcp_toolset import MCPToolset, SseServerParams, StdioServerParameters
-
-async def get_mcp_tools():
-    """Gets tools from the File System MCP Server."""
-    ACCESS_PATH = '/workspaces/devcontainers/llm-101/llm_101/workflow_and_agents/'
-    print("Attempting to connect to MCP Filesystem server...")
-    fs_tools = await MCPToolset.from_server(
-        # Use StdioServerParameters for local process communication
-        connection_params=StdioServerParameters(   # or SseServerParams for remote
-            command='npx',
-            args=["-y",
-                    "@modelcontextprotocol/server-filesystem",
-                    ACCESS_PATH],                           # <---- Path to the folder to access
-        )
-        # For remote servers, you would use SseServerParams instead:
-        # connection_params=SseServerParams(url="http://remote-server:port/path", headers={...})
+    mcp_agent = Agent(
+        name="mcp_agent",
+        model=AGENT_MODEL,
+        description="General assistant to help the user with various inquiries.",
+        instruction="You are a helpful general assistant. "
+                    "When the user asks for the weather in a specific city, "
+                    "use the 'get_weather' tool to find the information. "
+                    "If the tool is successful, present the weather report clearly."
+                    "You also have access to a bunch of tools from MCP servers in "
+                    "addition to the get_weather tools. "
+                    "These include:"
+                    " 1. Local filesystem tools (e.g., list, read, write files)"
+                    " 2. Google search tools (e.g., search, get links)"
+                    "If any tool returns an error, inform the user politely. ",
+        tools=[get_weather, tools],
+        after_agent_callback=after_agent_callback,
+        before_agent_callback=before_agent_callback,
     )
 
-    bq_tools = await MCPToolset.from_server(
-        connection_params=StdioServerParameters(   # or SseServerParams for remote
-            command='npx',
-            args=["-y",
-                    "@ergut/mcp-bigquery-server",   #  | git@github.com:ergut/mcp-bigquery-server.git
-                    "--project-id",
-                    "llm-training-wheels",
-                    "--location",
-                    "europe-west1",
-                    ],
-        )
-        # For remote servers, you would use SseServerParams instead:
-        # connection_params=SseServerParams(url="http://remote-server:port/path", headers={...})
+    print(f"Agent '{mcp_agent.name}' created using model '{AGENT_MODEL}'.")
+
+    return mcp_agent, exit_stack
+
+
+async def main():
+    # Create a session service
+    session_service = InMemorySessionService()
+    session = session_service.create_session(
+        app_name=APP_NAME,
+        user_id=USER_ID,
+        session_id=SESSION_ID,
     )
+    print(f"Session created: App='{APP_NAME}', User='{USER_ID}', Session='{SESSION_ID}'")
 
-    print("MCP Toolset created successfully.")
-    # MCP requires maintaining a connection to the local MCP Server.
-    # exit_stack manages the cleanup of this connection.
+    # Get the agent and the exit stack, assign agent to root_agent
+    root_agent, exit_stack = await get_agent_async()
+    print(f"Agent created: {root_agent.name}")
 
-    tools = [*fs_tools, *bq_tools]
-    return tools, exit_stack
+    # Create a runner with the root_agent object
+    runner = Runner(
+        agent=root_agent,
+        app_name=APP_NAME,
+        session_service=session_service
+    )
+    print(f"Runner created for agent '{runner.agent.name}'.")
 
-mcp_tools, exit_stack = await get_mcp_tools()
-other_tools = [
-    GoogleSearchTool(),
-    get_weather,
-]
+    # ----------------------------- load environment ----------------------------- #
+    _env_found: bool = load_dotenv(find_dotenv())
 
-weather_agent = Agent(
-    name="weather_agent_v1",
-    model=AGENT_MODEL,   # Can be a string for Gemini or a LiteLlm object
-    description="Provides weather information for specific cities.",
-    instruction="You are a helpful weather assistant. "
-                "When the user asks for the weather in a specific city, "
-                "use the 'get_weather' tool to find the information. "
-                "If the tool returns an error, inform the user politely. "
-                "If the tool is successful, present the weather report clearly."
-                "You can also use the Google Search tool to find information."
-                "If you need to access files, use the MCP File System tool."
-                "You can also use the BigQuery tool to access data.",
-    tools=[*mcp_tools, *other_tools],
-    after_agent_callback=after_agent_callback,
-    before_agent_callback=before_agent_callback,
-)
+    # ----------------- Check if the environment variable is set ----------------- #
+    if not _env_found:
+        print("No .env file found. Please set the GOOGLE_API_KEY environment variable.")
+    else:
+        print("Environment variables loaded successfully.")
 
-print(f"Agent '{weather_agent.name}' created using model '{AGENT_MODEL}'.")
-
-# Create a session service
-session_service = InMemorySessionService()
-session = session_service.create_session(
-    app_name=APP_NAME,
-    user_id=USER_ID,
-    session_id=SESSION_ID,
-)
-print(f"Session created: App='{APP_NAME}', User='{USER_ID}', Session='{SESSION_ID}'")
-
-# Create a runner
-runner = Runner(
-    agent=weather_agent, # The agent we want to run
-    app_name=APP_NAME,   # Associates runs with our app
-    session_service=session_service # Uses our session manager
-)
-print(f"Runner created for agent '{runner.agent.name}'.")
-
-# ----------------------------- load environment ----------------------------- #
-_env_found: bool = load_dotenv(find_dotenv())
+    # ----------------------------- run the conversation ----------------------------- #
+    try:
+        await run_conversation(runner)
+        return root_agent
+    except Exception as e:
+        print(f"An error occurred during conversation: {e}")
+    finally:
+        # Crucial Cleanup: Ensure the MCP server connection is closed.
+        print("Closing MCP server connection...")
+        await exit_stack.aclose()
+        print("Cleanup complete.")
 
 
-# ----------------- Check if the environment variable is set ----------------- #
-if not _env_found:
-    print("No .env file found. Please set the GOOGLE_API_KEY environment variable.")
-else:
-    print("Environment variables loaded successfully.")
-
-# ----------------------------- run the conversation ----------------------------- #
 try:
-    root_agent = weather_agent
-    asyncio.run(run_conversation(runner))
+    root_agent = asyncio.run(main())
 except Exception as e:
-    print(f"An error occurred: {e}")
+    print(f"An overall error occurred: {e}")

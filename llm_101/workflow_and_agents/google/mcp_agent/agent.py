@@ -1,5 +1,6 @@
 # ./adk_agent_samples/mcp_agent/agent.py
 import asyncio
+import os
 from dotenv import find_dotenv, load_dotenv
 from google.genai import types
 from google.adk.agents.llm_agent import LlmAgent
@@ -15,7 +16,8 @@ if not found_env:
     print("No .env file found. Ensure your environment variables are set correctly.")
 
 
-ACCESS_PATH = '/workspaces/devcontainers/llm-101/llm_101/workflow_and_agents/'
+access_path = os.getcwd()
+print(f"Accessing folder: {access_path}")
 
 # --- Step 1: Import Tools from MCP Server ---
 async def get_tools_async():
@@ -27,7 +29,7 @@ async def get_tools_async():
           command='npx', # Command to run the server
           args=["-y",    # Arguments for the command
                 "@modelcontextprotocol/server-filesystem",
-                ACCESS_PATH],                           # <---- Path to the folder to access
+                access_path],                           # <---- Path to the folder to access
       )
       # For remote servers, you would use SseServerParams instead:
       # connection_params=SseServerParams(url="http://remote-server:port/path", headers={...})
@@ -62,7 +64,7 @@ async def async_main():
 
   # TODO: Change the query to be relevant to YOUR specified folder.
   # e.g., "list files in the 'documents' subfolder" or "read the file 'notes.txt'"
-  query = "What do you suspect is in the folder based on the contents? Just list all files you can find."
+  query = "Please list all of the contents in the root directory './'"
   print(f"User Query: '{query}'")
   content = types.Content(role='user', parts=[types.Part(text=query)])
 
@@ -75,13 +77,32 @@ async def async_main():
       session_service=session_service,
   )
 
+  final_response_text = "Agent did not produce a final response." # Default
   print("Running agent...")
-  events_async = runner.run_async(
-      session_id=session.id, user_id=session.user_id, new_message=content
-  )
+  async for event in runner.run_async(
+        user_id=session.user_id,
+        session_id=session.id,
+        new_message=content,
+    ):
+    # Optional: Print events for debugging if needed
+    # print()
+    # print(f"Event received: \n{event}")
+    if event.is_final_response():
+      print("-- FINAL RESPONSE RECEIVED --")
+      # Ensure the content is fully loaded (though often not strictly needed for text)
+      if event.content and event.content.parts and event.content.parts[0].text:
+          final_response_text = event.content.parts[0].text
+      else:
+          final_response_text = "Agent produced a final response, but it was empty."
 
-  async for event in events_async:
-    print(f"Event received: {event}")
+      if event.actions and event.actions.escalate: # Handle potential errors/escalations
+        final_response_text = f"Agent escalated: {event.error_message or 'No specific message.'}"
+      break # Stop processing events once the final response is found
+    # Removed intermediate print from here
+
+  # Print the final result after the loop finishes
+  print("\n--- Agent Execution Complete ---")
+  print(f"Final Response: {final_response_text}")
 
   # Crucial Cleanup: Ensure the MCP server process connection is closed.
   print("Closing MCP server connection...")
