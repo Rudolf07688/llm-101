@@ -68,26 +68,19 @@ def get_weather(city: str) -> dict:
         return {"status": "error", "error_message": f"Sorry, I don't have weather information for '{city}'."}
 
 
-async def get_mcp_tools():
-    """Gets tools from the different MCP Servers."""
-    access_path = os.getcwd()
-    print(f"Access folder: {access_path}")
-
+async def get_tools_async():
+    """Gets tools from the File System MCP Server."""
     print("Attempting to connect to MCP Filesystem server...")
-    fs_tools, fs_exit_stack = await MCPToolset.from_server(
+    tools, exit_stack = await MCPToolset.from_server(
         connection_params=StdioServerParameters(
             command='npx',
             args=["-y",
-                  "@modelcontextprotocol/server-filesystem",
-                  access_path],                           # <---- Path to the folder to access
+                    "@modelcontextprotocol/server-filesystem",
+                    os.getcwd()],                           # <---- Path to the folder to access
         )
     )
-
     print("MCP Toolset created successfully.")
-
-    tools = [fs_tools]
-    exit_stacks = [fs_exit_stack]
-    return tools, exit_stacks
+    return tools, exit_stack
 
 
 async def call_agent_async(query: str, runner: Runner, user_id, session_id):
@@ -128,9 +121,7 @@ async def run_conversation(runner: Runner):
     
 async def get_agent_async():
     """Creates an ADK Agent equipped with tools from the MCP Server."""
-    mcp_tools, mcp_exit_stacks = await get_mcp_tools()
-    for tool_kit in mcp_tools:
-        print(f"Fetched {len(tool_kit)} tools from MCP server.")
+    tools, exit_stack = await get_tools_async()
 
     mcp_agent = Agent(
         name="mcp_agent",
@@ -146,51 +137,61 @@ async def get_agent_async():
                     " 1. Local filesystem tools (e.g., list, read, write files)"
                     " 2. Google search tools (e.g., search, get links)"
                     "If any tool returns an error, inform the user politely. ",
-        tools=[get_weather, mcp_tools],
+        tools=[get_weather, tools],
         after_agent_callback=after_agent_callback,
         before_agent_callback=before_agent_callback,
     )
 
     print(f"Agent '{mcp_agent.name}' created using model '{AGENT_MODEL}'.")
 
-    return mcp_agent, mcp_exit_stacks
-
-# if __name__ == "__main__":
+    return mcp_agent, exit_stack
 
 
-# Create a session service
-session_service = InMemorySessionService()
-session = session_service.create_session(
-    app_name=APP_NAME,
-    user_id=USER_ID,
-    session_id=SESSION_ID,
-)
-print(f"Session created: App='{APP_NAME}', User='{USER_ID}', Session='{SESSION_ID}'")
+async def main():
+    # Create a session service
+    session_service = InMemorySessionService()
+    session = session_service.create_session(
+        app_name=APP_NAME,
+        user_id=USER_ID,
+        session_id=SESSION_ID,
+    )
+    print(f"Session created: App='{APP_NAME}', User='{USER_ID}', Session='{SESSION_ID}'")
 
-# Get the agent
-weather_agent, exit_stacks = asyncio.run(get_agent_async())
+    # Get the agent and the exit stack, assign agent to root_agent
+    root_agent, exit_stack = await get_agent_async()
+    print(f"Agent created: {root_agent.name}")
 
-# Create a runner
-runner = Runner(
-    agent=weather_agent, # The agent we want to run
-    app_name=APP_NAME,   # Associates runs with our app
-    session_service=session_service # Uses our session manager
-)
-print(f"Runner created for agent '{runner.agent.name}'.")
+    # Create a runner with the root_agent object
+    runner = Runner(
+        agent=root_agent,
+        app_name=APP_NAME,
+        session_service=session_service
+    )
+    print(f"Runner created for agent '{runner.agent.name}'.")
 
-# ----------------------------- load environment ----------------------------- #
-_env_found: bool = load_dotenv(find_dotenv())
+    # ----------------------------- load environment ----------------------------- #
+    _env_found: bool = load_dotenv(find_dotenv())
+
+    # ----------------- Check if the environment variable is set ----------------- #
+    if not _env_found:
+        print("No .env file found. Please set the GOOGLE_API_KEY environment variable.")
+    else:
+        print("Environment variables loaded successfully.")
+
+    # ----------------------------- run the conversation ----------------------------- #
+    try:
+        await run_conversation(runner)
+        return root_agent
+    except Exception as e:
+        print(f"An error occurred during conversation: {e}")
+    finally:
+        # Crucial Cleanup: Ensure the MCP server connection is closed.
+        print("Closing MCP server connection...")
+        await exit_stack.aclose()
+        print("Cleanup complete.")
 
 
-# ----------------- Check if the environment variable is set ----------------- #
-if not _env_found:
-    print("No .env file found. Please set the GOOGLE_API_KEY environment variable.")
-else:
-    print("Environment variables loaded successfully.")
-
-# ----------------------------- run the conversation ----------------------------- #
 try:
-    root_agent = weather_agent
-    asyncio.run(run_conversation(runner))
+    root_agent = asyncio.run(main())
 except Exception as e:
-    print(f"An error occurred: {e}")
+    print(f"An overall error occurred: {e}")
