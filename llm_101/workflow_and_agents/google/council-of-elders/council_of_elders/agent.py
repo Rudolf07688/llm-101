@@ -1,12 +1,6 @@
-
-
-"""Top level agent for data agent multi-agents.
-
--- it get data from database (e.g., BQ) using NL2SQL
--- then, it use NL2Py to do further data analysis as needed
-"""
 import os
 from datetime import date
+from dotenv import find_dotenv, load_dotenv
 
 # from google.genai import types
 
@@ -22,6 +16,12 @@ from .prompts import return_instructions_root
 # from .tools import call_db_agent, call_ds_agent
 
 date_today = date.today()
+
+print("\n\n ------------------------- \n\n")
+print(f"Today's date: {date_today}")
+print(f"Found Env: {find_dotenv()}")
+print(f"Env loaded: {load_dotenv(find_dotenv())}")
+print("\n\n ------------------------- \n\n")
 
 
 # def setup_before_agent_call(callback_context: CallbackContext):
@@ -47,7 +47,6 @@ date_today = date.today()
 
 #     """
 #         )
-
 
 
 root_agent = LoopAgent(
