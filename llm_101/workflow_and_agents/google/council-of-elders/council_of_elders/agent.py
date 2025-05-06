@@ -8,7 +8,7 @@ from google.adk.agents import LoopAgent
 # from google.adk.agents.callback_context import CallbackContext
 # from google.adk.tools import load_artifacts
 
-from .sub_agents.council_agent.agent import council_agent
+from .sub_agents.elder_agent.agent import elder_agent
 from .prompts import return_instructions_root
 # from .sub_agents.bigquery.tools import (
 #     get_database_settings as get_bq_database_settings,
@@ -62,7 +62,7 @@ root_agent = LoopAgent(
         """
     ),
     sub_agents=[
-        council_agent,
+        elder_agent,
     ],
     tools=[
         # call_db_agent,
